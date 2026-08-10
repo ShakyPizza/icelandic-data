@@ -159,10 +159,14 @@ uv run python scripts/kortagerð.py static -o reports/iceland-map.png
 uv run python scripts/kortagerð.py html -o reports/iceland-map.html
 uv run python scripts/kortagerð.py static --bounds capital --highlight "Reykjavíkurborg" -o reports/rvk.png
 
-# Náttúrufræðistofnun: download habitat-type polygons via WFS
-# (vistgerðir 1:25.000 3rd ed.; DN=95 = L14.2 Tún og akurlendi, ~1,800 km²)
-uv run python scripts/natt.py habitat --dn 95
-uv run python scripts/natt.py inventory          # list all DN→htxt codes
+# Náttúrufræðistofnun: habitat-type mask from the 5 m vistgerðir raster via WCS
+# (1:25.000 3rd ed.; DN=95 = L14.2 Tún og akurlendi, 1,806 km²)
+# The old LMI_vektor:vistgerd polygon layer was withdrawn in 2026 — raster only.
+# Fetch cost is server-bound and scales with output pixels — see --res below.
+uv run python scripts/natt.py habitat --dn 95            # 50 m ISN93 mask, ~2 min
+uv run python scripts/natt.py habitat --dn 95 --res 100  # ~1 min, still map-grade
+uv run python scripts/natt.py habitat --dn 95 --res 20   # ~30 min, detail work
+uv run python scripts/natt.py inventory          # DN→htxt codes, from the WMS legend
 
 # Map of Iceland's agricultural land (PNG + single-file Leaflet HTML)
 uv run python scripts/agricultural_land_map.py
@@ -283,7 +287,15 @@ uv run python scripts/health_verdict.py --history .history/history.jsonl --windo
 
 Health probes run daily in `.github/workflows/source-health.yml`. Browser probes
 are manual-dispatch only — from a datacenter IP, Power BI/Tableau failures say
-more about bot detection than about the source being down.
+more about bot detection than about the source being down. The `browser` marker
+means *cannot be honestly observed from CI*, not *needs Chromium*: `samgongustofa`
+carries it because `bifreidatolur.samgongustofa.is` is geo-fenced — 50 ms from an
+Icelandic IP, `ConnectTimeout` from every runner (2026-08-06).
+
+Note that `degraded_ok` is **not** an escape hatch for an unreachable source: a
+degraded row is still a non-healthy observation to `health_verdict.py`, so three
+in a row still read `dead` and still gate. Only `skipped` rows (and no rows at
+all) are excluded from the streak.
 
 To add a probe for a new source, see the `new-data-source` skill.
 
