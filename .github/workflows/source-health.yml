@@ -4,8 +4,13 @@ name: Source health
 # depends on. Deliberately NOT a fetch run: no full datasets, no PDF
 # extraction, no geodata rebuilds.
 #
-# Lightweight probes run daily. Browser probes are manual-only — see the job
-# comment for why.
+# Both jobs run on the self-hosted mac-mini (labels: self-hosted, iceland).
+# GitHub-hosted runners sit in Azure datacenters with no Iceland region, which
+# breaks geo-fenced sources (bifreidatolur.samgongustofa.is times out from
+# datacenter IPs) and trips Power BI/Tableau bot detection. From an Icelandic
+# residential IP both observe honestly — so the browser job can be scheduled
+# if ever wanted; it stays manual-dispatch for now to keep the daily runtime
+# lean.
 
 on:
   schedule:
@@ -30,7 +35,10 @@ permissions:
 jobs:
   lightweight:
     name: Lightweight probes
-    runs-on: ubuntu-latest
+    # Self-hosted on the mac-mini (solberg.club, Iceland): geo-fenced sources
+    # like bifreidatolur.samgongustofa.is answer Icelandic IPs but time out
+    # from GitHub's datacenter ranges. Labels: self-hosted, iceland.
+    runs-on: [self-hosted, iceland]
     timeout-minutes: 10
     # Job-level so the ping step can test it in `if:` — the secrets context is
     # not available there, but the env context is. Unset secret -> empty string
@@ -221,15 +229,15 @@ jobs:
             health-*.xml
           retention-days: 30
 
-  # Not scheduled, by design. These probes drive Power BI / Tableau / Playwright
-  # from a datacenter IP, where bot detection and headless fingerprinting cause
-  # failures that say nothing about whether the source is actually up. Running
-  # them nightly would mostly teach us that GitHub's IP ranges are blocked. Run
-  # on demand when a dashboard scraper is suspect.
+  # Manual dispatch (not scheduled): keeps the daily run lean; nothing
+  # geo-fencing-related blocks a schedule anymore — see the job-level comment.
   browser:
     name: Browser probes (manual)
     if: github.event_name == 'workflow_dispatch' && inputs.browser
-    runs-on: ubuntu-latest
+    # Self-hosted on the mac-mini: Power BI / Tableau bot detection targets
+    # datacenter IPs, which is why this job was manual-only on GitHub-hosted
+    # runners. From an Icelandic residential IP the probes observe honestly.
+    runs-on: [self-hosted, iceland]
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
@@ -244,7 +252,7 @@ jobs:
         run: uv sync --locked
 
       - name: Install Chromium
-        run: uv run playwright install --with-deps chromium
+        run: uv run playwright install chromium
 
       - name: Browser probes
         continue-on-error: true

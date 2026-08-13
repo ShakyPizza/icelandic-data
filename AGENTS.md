@@ -285,12 +285,15 @@ uv run python scripts/health_summary.py --required health-required.xml \
 uv run python scripts/health_verdict.py --history .history/history.jsonl --window-days 30
 ```
 
-Health probes run daily in `.github/workflows/source-health.yml`. Browser probes
-are manual-dispatch only — from a datacenter IP, Power BI/Tableau failures say
-more about bot detection than about the source being down. The `browser` marker
-means *cannot be honestly observed from CI*, not *needs Chromium*: `samgongustofa`
-carries it because `bifreidatolur.samgongustofa.is` is geo-fenced — 50 ms from an
-Icelandic IP, `ConnectTimeout` from every runner (2026-08-06).
+Health probes run daily in `.github/workflows/source-health.yml`, on the
+self-hosted mac-mini (`solberg.club`, labels `self-hosted` + `iceland`) — the
+runner exists because GitHub-hosted runners sit in Azure datacenters with no
+Iceland region: geo-fenced sources like `bifreidatolur.samgongustofa.is`
+answer Icelandic IPs in ~50 ms but `ConnectTimeout` from every GitHub runner,
+and Power BI/Tableau bot detection trips on datacenter IPs. The `browser`
+marker means *needs a non-datacenter IP*, not *needs Chromium*; the browser
+job stays manual-dispatch by policy (lean daily runtime), but nothing
+geo-fencing-related blocks scheduling it anymore.
 
 Note that `degraded_ok` is **not** an escape hatch for an unreachable source: a
 degraded row is still a non-healthy observation to `health_verdict.py`, so three
