@@ -120,51 +120,35 @@ Three more gotchas:
 
 `list`, `--dimension`, `--years/--monthly`, `--import-state` and `--where`
 cover almost everything by composition. For anything they don't — a bespoke
-aggregation, a column the CLI has no alias for, driving a slicer in the UI,
-capturing a visual the script doesn't model — **import the module and reuse its
-helpers** rather than starting from scratch. They already solve discovery,
-the iframe-replay auth, the modelId gotcha and both response shapes.
+aggregation, a multi-measure visual, driving a slicer in the UI — drop to the
+generic **`scripts/powerbi.py`** primitives (see the `powerbi` skill) rather
+than starting from scratch. They already solve discovery, the iframe-replay
+auth, the modelId gotcha and the DSR decompression.
 
 ```python
 import asyncio, sys; sys.path.insert(0, "scripts")
-import samgongustofa as sg
+import powerbi as pb
 from playwright.async_api import async_playwright
 
 async def main():
     async with async_playwright() as p:
         b = await p.chromium.launch(headless=True)
         page = await b.new_page()
-        # 1. discover: live frame + rotating key + one query template per visual
-        frame, key, templates = await sg._discover(page, "nyskraningar")
-        # 2. build: clone a template, set slicers, add arbitrary In() filters
-        payload = sg._rewrite(templates["Tegund"], year=2026)      # make × 2026
-        sg._apply_where(payload, [("Orkugjafi", ["Rafmagn"])])     # ...BEV only
-        # 3. replay inside the iframe (handles 401/429 retry) → {value: count}
-        rows = await sg._replay_retry(frame, key, payload)
+        d = await pb.discover(page, "https://bifreidatolur.samgongustofa.is/", anchor="#nyskraningar")
+        payload = pb.where_in(d.templates["Tegund"], "Ár - ísl.", ["2026L"], text=False)  # make × 2026
+        payload = pb.where_in(payload, "Orkugjafi", ["Rafmagn"])                            # ...BEV only
+        rows = pb.group_counts(await pb.replay(d.frame, d.key, payload, retries=1))
         await b.close()
     print(sorted(rows.items(), key=lambda kv: -kv[1])[:10])
 
 asyncio.run(main())
 ```
 
-Helper reference:
-
-| helper | does |
-|---|---|
-| `_discover(page, report)` | open a section → `(frame, key, templates_by_dim)` |
-| `_rewrite(body, *, year, month, import_state)` | clone a template, set the slicers |
-| `_in_condition(col, literal)` | one `In` filter; year literal is `2023L`, text is `'x'` |
-| `_apply_where(payload, [(col, [vals])])` | append arbitrary `In` filters |
-| `_replay_retry(frame, key, payload)` | POST inside the iframe → `{value: count}` |
-| `_parse(body)` | raw querydata JSON → `{value: count}` (both row shapes) |
-
-Query anatomy for hand-written filters: a visual is a
-`SemanticQueryDataShapeCommand` with `Select` (group-by columns + measures),
-`Where` (a list of `In` conditions), `OrderBy`, and a `Binding`. To learn a new
-column or literal format, drive the slicer/visual once in a
-non-headless Playwright session with a `page.on("request", …)` listener and read
-the `post_data` it fires — that is exactly how every constant in this skill was
-found.
+`d.templates` is keyed by each visual's first group-by column (`Tegund`,
+`Orkugjafi`, `Ökutækisflokkur`, `Undirtegund`). To learn a new column or literal
+format, drive the slicer once with a `page.on("request", …)` listener and read
+the `post_data` — how every constant here was found (`pb.capture_requests`
+helps). Full helper reference is in the `powerbi` skill.
 
 ## GEO-FENCE — must run from Iceland
 
