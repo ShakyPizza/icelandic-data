@@ -14,25 +14,13 @@ the chain can, and if it does the documented recipe silently scrapes an empty
 page. Probing the site root alone would be worthless: it returns 200 with a
 static shell even if every route below it is gone.
 
-Lightweight: resolving the token and asking Power BI whether that report still
-exists needs no browser. Only the DAX capture does, and that is manual-only.
-
-GEO-FENCE (observed 2026-08-06) — why this module is marked `browser` despite
-using no browser at all:
-
-    bifreidatolur.samgongustofa.is answers in ~50 ms from an Icelandic IP and
-    `httpx.ConnectTimeout` from every GitHub Actions runner, 22 runs out of 22
-    since the probe was written. The host is not down; it is unreachable from
-    datacenter address space.
-
-That is the same class of failure the `browser` lane exists to hold — "from a
-datacenter IP, a failure says more about bot detection than about the source"
-— so the marker is reused rather than a fourth lane invented. Read `browser`
-here as *cannot be honestly observed from CI*, not as *needs Chromium*.
-Consequence: this probe is observed only when run by hand from Iceland
-(`uv run pytest -m "health and browser" -k samgongustofa`), and the daily
-required lane records no observation for samgongustofa at all — which is the
-correct answer, because CI genuinely cannot see this source.
+This probe needs no browser at all — only the DAX capture does, and that stays
+a manual recipe. It ran in the manual `browser` lane from 2026-08-06 until the
+self-hosted mac-mini runner (labels: self-hosted, iceland) took over the daily
+lane: the host geo-fences datacenter address space (`httpx.ConnectTimeout`
+from every GitHub Actions runner) but answers Icelandic IPs in ~50 ms, and the
+daily job now runs from Iceland. Nothing left in the repo needs a manual
+browser lane, so the marker is gone with it.
 """
 from __future__ import annotations
 
@@ -41,8 +29,6 @@ import json
 import re
 
 import pytest
-
-pytestmark = pytest.mark.browser
 
 BASE = "https://bifreidatolur.samgongustofa.is"
 ROUTER = f"{BASE}/js/script.js?v=2"

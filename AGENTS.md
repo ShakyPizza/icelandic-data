@@ -273,9 +273,9 @@ uv run pytest -m slow                  # network + Playwright integration tests
 # Upstream health probes (tests/health/) — smallest stable contract per source
 uv run pytest -m health                        # every probe
 uv run pytest -m health -k hagstofan           # one source by name
-uv run pytest -m "health and not browser and not degraded_ok"   # required lane
+uv run pytest -m "health and not degraded_ok"   # required lane
 uv run pytest -m "health and degraded_ok"      # staleness / known-soft lane
-uv run pytest -m browser                       # Playwright probes (manual only)
+uv run pytest -m health                        # every probe
 
 # Render today's snapshot from both lanes
 uv run python scripts/health_summary.py --required health-required.xml \
@@ -290,10 +290,9 @@ self-hosted mac-mini (`solberg.club`, labels `self-hosted` + `iceland`) — the
 runner exists because GitHub-hosted runners sit in Azure datacenters with no
 Iceland region: geo-fenced sources like `bifreidatolur.samgongustofa.is`
 answer Icelandic IPs in ~50 ms but `ConnectTimeout` from every GitHub runner,
-and Power BI/Tableau bot detection trips on datacenter IPs. The `browser`
-marker means *needs a non-datacenter IP*, not *needs Chromium*; the browser
-job stays manual-dispatch by policy (lean daily runtime), but nothing
-geo-fencing-related blocks scheduling it anymore.
+and Power BI/Tableau bot detection trips on datacenter IPs. There is no
+`browser` lane anymore — the one probe that used it (`samgongustofa`, plain
+HTTP) was only geo-fence-blocked, and the mini fixed that.
 
 Note that `degraded_ok` is **not** an escape hatch for an unreachable source: a
 degraded row is still a non-healthy observation to `health_verdict.py`, so three
