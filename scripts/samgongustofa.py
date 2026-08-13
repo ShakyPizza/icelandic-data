@@ -230,6 +230,39 @@ def _rewrite(body, *, year=None, month=None, import_state="all"):
     return b
 
 
+def _parse_where(specs):
+    """['Orkugjafi=Rafmagn', 'Innflutningsástand=Nýtt;Notað'] -> [(col, [vals])].
+
+    Values are OR'd within a column (';'-separated) and AND'd across --where.
+    """
+    out = []
+    for spec in specs or []:
+        col, sep, val = spec.partition("=")
+        if not sep:
+            raise SystemExit(f"--where must be COL=VALUE, got {spec!r}")
+        vals = [v.strip() for v in val.split(";") if v.strip()]
+        out.append((col.strip(), vals))
+    return out
+
+
+def _apply_where(payload, wheres):
+    """Append arbitrary In(column, values) filters to a built payload.
+
+    Values are sent as text literals — the right form for the categorical
+    columns you cross-filter on (Orkugjafi, Ökutækisflokkur, Tegund, ...). The
+    year slicer has its own numeric-literal path (--years).
+    """
+    if not wheres:
+        return payload
+    q = payload["queries"][0]["Query"]["Commands"][0]["SemanticQueryDataShapeCommand"]["Query"]
+    for col, vals in wheres:
+        q.setdefault("Where", []).append({"Condition": {"In": {
+            "Expressions": [{"Column": {"Expression": {"SourceRef": {"Source": "q"}}, "Property": col}}],
+            "Values": [[{"Literal": {"Value": f"'{v}'"}}] for v in vals],
+        }}})
+    return payload
+
+
 def _parse(body):
     """DM0 rows -> {dimension_value: count}.
 
@@ -299,6 +332,7 @@ async def _run_fetch(args):
                 f"visuals: {sorted(templates)}"
             )
         template = templates[dim_col]
+        wheres = _parse_where(args.where)
         records, header = [], [args.dimension]
 
         if cfg["temporal"]:
@@ -309,7 +343,7 @@ async def _run_fetch(args):
                   f"months={'Jan..' + months[-1] if args.monthly else 'all'}", file=sys.stderr)
             for year in years:
                 for month in months:
-                    payload = _rewrite(template, year=year, month=month, import_state=args.import_state)
+                    payload = _apply_where(_rewrite(template, year=year, month=month, import_state=args.import_state), wheres)
                     rows = await _replay_retry(frame, key, payload)
                     for name, cnt in sorted(rows.items(), key=lambda kv: -kv[1]):
                         rec = {args.dimension: name, "year": year, "count": int(cnt)}
@@ -322,7 +356,7 @@ async def _run_fetch(args):
         else:  # snapshot
             header += ["count"]
             print(f"report={args.report} key={key} dim={dim_col} (current fleet snapshot)", file=sys.stderr)
-            rows = await _replay_retry(frame, key, _rewrite(template, import_state=args.import_state))
+            rows = await _replay_retry(frame, key, _apply_where(_rewrite(template, import_state=args.import_state), wheres))
             for name, cnt in sorted(rows.items(), key=lambda kv: -kv[1]):
                 records.append({args.dimension: name, "count": int(cnt)})
             print(f"  {len(rows)} {args.dimension}s on road, {int(sum(rows.values())):,} total", file=sys.stderr)
@@ -335,6 +369,9 @@ async def _run_fetch(args):
         parts.append("by_year_month" if args.monthly else "by_year")
     if args.import_state != "all":
         parts.append(args.import_state)
+    for col, vals in wheres:
+        tag = col.split(" ")[0].split("-")[0][:6] + "-" + "+".join(vals)
+        parts.append("".join(ch for ch in tag if ch.isalnum() or ch in "-+"))
     out = Path(args.out) if args.out else OUT_DIR / ("_".join(parts) + ".csv")
     with out.open("w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=header)
@@ -360,11 +397,13 @@ async def _run_list(args):
                 tag = f"--dimension {alias}" if alias else "(bonus column, no alias)"
                 print(f"      {col:<26} {tag}")
         print("\nSlicers (nyskraningar): --years / --monthly (" + MONTH_COL + ") / --import-state new|used")
+        print("Cross-filter any report by any column: --where 'COL=VALUE' (repeatable; ';' = OR)")
         print("Months:", ", ".join(MONTHS))
         print("\nExamples:")
-        print("  fetch --report onroad --dimension fuel        # current EV/petrol/diesel fleet split")
-        print("  fetch --dimension make --years 2020-2026      # imports by brand per year")
+        print("  fetch --report onroad --dimension fuel               # current EV/petrol/diesel fleet split")
+        print("  fetch --dimension make --years 2020-2026             # imports by brand per year")
         print("  fetch --dimension fuel --years 2025,2026 --monthly")
+        print("  fetch --dimension make --years 2026 --where 'Orkugjafi=Rafmagn'   # BEV imports by brand")
         await browser.close()
 
 
@@ -385,6 +424,9 @@ def main():
     pf.add_argument("--through", type=int, default=12, metavar="N",
                     help="with --monthly, only months 1..N (default 12)")
     pf.add_argument("--import-state", choices=["all", "new", "used"], default="all")
+    pf.add_argument("--where", action="append", metavar="COL=VALUE",
+                    help="cross-filter by any model column, repeatable; ';' OR-joins values, "
+                         "e.g. --where 'Orkugjafi=Rafmagn' (see column names in `list`)")
     pf.add_argument("--out", help="output CSV path (default data/processed/samgongustofa/)")
     pf.set_defaults(func=lambda a: asyncio.run(_run_fetch(a)))
 

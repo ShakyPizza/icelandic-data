@@ -54,11 +54,29 @@ named `Tegund` ("kind") in the model.
 `fuel` is the cleanest read on Iceland's EV transition: e.g. the current fleet
 snapshot is ~171k Bensín, ~151k Dísel, ~44k Rafmagn, ~30k Tengiltvinn.
 
-## Slicers (nyskraningar only)
+## Slicers & cross-filters
+
+Temporal slicers (nyskraningar only):
 
 - `--years 2020-2026` or `--years 2025,2026` — the `Ár - ísl.` slicer (values like `2023L`).
 - `--monthly` — break each year into months (`Mánuður - ísl.`, text labels `01-janúar` … `12-desember`); `--through N` stops at month N.
 - `--import-state new|used|all` — the `Innflutningsástand` slicer (`'Nýtt'`/`'Notað'`). Default `all` = both.
+
+Cross-filter **either report by any model column** with `--where 'COL=VALUE'`
+(repeatable = AND across columns; `;` inside a value = OR). This turns the
+single-axis visuals into crosstabs the dashboard never shows directly:
+
+```bash
+# BEV imports by brand, 2026 — cross make × fuel
+uv run python scripts/samgongustofa.py fetch --dimension make --years 2026 --where 'Orkugjafi=Rafmagn'
+
+# Electric + PHEV vans on the road, by make
+uv run python scripts/samgongustofa.py fetch --report onroad --dimension make \
+    --where 'Orkugjafi (groups)=Rafmagn;Tengiltvinn' --where 'Ökutækjaflokkur=Sendibifreið N1'
+```
+
+Column names are the raw Power BI properties — `list` prints them all. Values
+are matched as text; the year axis has its own `--years` path.
 
 Note the current calendar month is **partial** — the newest month reflects
 registrations to date, not a full month.
@@ -97,6 +115,56 @@ Three more gotchas:
 3. Response rows come in two shapes: `nyskraningar` uses `C: [dimension, count]`;
    `onroad` uses `G0` + `X[0].M0` (in-traffic count) + `X[1].M0` (new-this-period).
    The parser handles both.
+
+## Beyond the CLI — Playwright one-offs
+
+`list`, `--dimension`, `--years/--monthly`, `--import-state` and `--where`
+cover almost everything by composition. For anything they don't — a bespoke
+aggregation, a column the CLI has no alias for, driving a slicer in the UI,
+capturing a visual the script doesn't model — **import the module and reuse its
+helpers** rather than starting from scratch. They already solve discovery,
+the iframe-replay auth, the modelId gotcha and both response shapes.
+
+```python
+import asyncio, sys; sys.path.insert(0, "scripts")
+import samgongustofa as sg
+from playwright.async_api import async_playwright
+
+async def main():
+    async with async_playwright() as p:
+        b = await p.chromium.launch(headless=True)
+        page = await b.new_page()
+        # 1. discover: live frame + rotating key + one query template per visual
+        frame, key, templates = await sg._discover(page, "nyskraningar")
+        # 2. build: clone a template, set slicers, add arbitrary In() filters
+        payload = sg._rewrite(templates["Tegund"], year=2026)      # make × 2026
+        sg._apply_where(payload, [("Orkugjafi", ["Rafmagn"])])     # ...BEV only
+        # 3. replay inside the iframe (handles 401/429 retry) → {value: count}
+        rows = await sg._replay_retry(frame, key, payload)
+        await b.close()
+    print(sorted(rows.items(), key=lambda kv: -kv[1])[:10])
+
+asyncio.run(main())
+```
+
+Helper reference:
+
+| helper | does |
+|---|---|
+| `_discover(page, report)` | open a section → `(frame, key, templates_by_dim)` |
+| `_rewrite(body, *, year, month, import_state)` | clone a template, set the slicers |
+| `_in_condition(col, literal)` | one `In` filter; year literal is `2023L`, text is `'x'` |
+| `_apply_where(payload, [(col, [vals])])` | append arbitrary `In` filters |
+| `_replay_retry(frame, key, payload)` | POST inside the iframe → `{value: count}` |
+| `_parse(body)` | raw querydata JSON → `{value: count}` (both row shapes) |
+
+Query anatomy for hand-written filters: a visual is a
+`SemanticQueryDataShapeCommand` with `Select` (group-by columns + measures),
+`Where` (a list of `In` conditions), `OrderBy`, and a `Binding`. To learn a new
+column or literal format, drive the slicer/visual once in a
+non-headless Playwright session with a `page.on("request", …)` listener and read
+the `post_data` it fires — that is exactly how every constant in this skill was
+found.
 
 ## GEO-FENCE — must run from Iceland
 
