@@ -1,144 +1,132 @@
 ---
 name: samgongustofa
-description: Icelandic vehicle registrations by make, fuel type and location (Samgöngustofa) via Power BI.
+description: Icelandic vehicle registrations by make, fuel, class and model (Samgöngustofa) — new registrations (imports) and current on-road fleet, via a reverse-engineered Power BI API.
 ---
 
-# Samgöngustofa (Iceland Transport Authority)
+# Samgöngustofa (Iceland Transport Authority) — bifreiðatölur
 
-Vehicle registration statistics via Power BI dashboard scraping.
+Vehicle-registration statistics from `https://bifreidatolur.samgongustofa.is/`.
+The site is a thin SPA that embeds a **separate Power BI report per section**,
+each with its own resource key. `scripts/samgongustofa.py` extracts tidy CSVs
+from two of them.
 
-## Data Source
+## Quick start
 
-**Dashboard URL:** `https://bifreidatolur.samgongustofa.is/`
+```bash
+# What's available (both reports, their keys, every groupable dimension)
+uv run python scripts/samgongustofa.py list
 
-The dashboard is a Power BI embedded report. Data must be extracted by intercepting API calls.
+# Current fleet on the road, by fuel — the EV-transition read
+uv run python scripts/samgongustofa.py fetch --report onroad --dimension fuel
 
-## Available Data
+# New registrations (imports) by brand, per year
+uv run python scripts/samgongustofa.py fetch --dimension make --years 2020-2026
 
-| Dataset | Description |
-|---------|-------------|
-| Vehicle makes | All registered vehicles by make (TOYOTA, VW, etc.) |
-| Fuel types | Vehicles by fuel type (Bensín, Dísel, Rafmagn, etc.) |
-| Locations | Registrations by municipality with coordinates |
-| Vehicle types | M1 (passenger), N1 (van), etc. |
-| New vs used | New registrations vs imports |
+# Same, month by month, for a YoY view
+uv run python scripts/samgongustofa.py fetch --dimension make --years 2025,2026 --monthly
 
-## Extraction Method
-
-Use Playwright to intercept Power BI query responses:
-
-```python
-import asyncio
-from playwright.async_api import async_playwright
-import json
-
-async def scrape_vehicle_data():
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
-        page = await browser.new_page()
-
-        query_results = []
-
-        async def handle_response(response):
-            url = response.url
-            if 'querydata' in url.lower() or 'executeQueries' in url.lower():
-                try:
-                    if response.status == 200:
-                        body = await response.json()
-                        query_results.append(body)
-                except:
-                    pass
-
-        page.on('response', handle_response)
-
-        await page.goto('https://bifreidatolur.samgongustofa.is/',
-                       wait_until='networkidle', timeout=60000)
-        await asyncio.sleep(8)  # Wait for all queries to complete
-
-        await browser.close()
-        return query_results
+# Only brand-new (exclude imported-used)
+uv run python scripts/samgongustofa.py fetch --dimension fuel --years 2024-2026 --import-state new
 ```
 
-## Parsing Power BI Response
+Output lands in `data/processed/samgongustofa/<report>_<dimension>[_by_year[_month]][_new|_used].csv`
+as tidy long format, e.g. `make,year,count` or `fuel,count`.
 
-Power BI returns data in a nested structure:
+## Two reports: flow vs stock
 
-```python
-def parse_powerbi_data(results):
-    """Extract tabular data from Power BI query results."""
-    for result in results:
-        if 'results' not in result:
-            continue
-        for res in result['results']:
-            dsr = res.get('result', {}).get('data', {}).get('dsr', {})
-            for ds in dsr.get('DS', []):
-                for ph in ds.get('PH', []):
-                    dm = ph.get('DM0', [])
-                    for row in dm:
-                        # G0 = dimension value (e.g., make name)
-                        # X[0].M0 = first measure (e.g., registered count)
-                        # X[1].M0 = second measure (e.g., new registrations)
-                        make = row.get('G0', '')
-                        x_data = row.get('X', [{}])
-                        registered = x_data[0].get('M0', 0) if x_data else 0
-                        new_reg = x_data[1].get('M0', 0) if len(x_data) > 1 else 0
-                        yield {'make': make, 'registered': registered, 'new': new_reg}
+| `--report` | Section | Meaning | Time |
+|---|---|---|---|
+| `nyskraningar` (default) | `#nyskraningar` | **New registrations = imports.** First Icelandic registration — brand-new *and* imported-used. The **flow** into the fleet. | year / month / new-vs-used slicers |
+| `onroad` | `#tolfraedi` ("Tölfræði ökutækja") | **Current fleet on the road** ("í umferð") — every vehicle with an active registration. The **stock**. | snapshot (no year) |
+
+## Four dimensions (`--dimension`)
+
+Every report groups by the same four axes. Confusingly, the brand column is
+named `Tegund` ("kind") in the model.
+
+| `--dimension` | PB column (nyskr. / onroad) | Example values |
+|---|---|---|
+| `make` | `Tegund` | TOYOTA, KIA, VOLKSWAGEN, BYD, TESLA, MG, XPENG, … |
+| `fuel` | `Orkugjafi` / `Orkugjafi (groups)` | Bensín, Dísel, **Rafmagn** (electric), **Tengiltvinn** (PHEV), Hybrid, Metan, Vetni, Vélarlaus (engineless=trailers), Annað |
+| `class` | `Ökutækisflokkur` / `Ökutækjaflokkur` | Fólksbifreið M1, Sendibifreið N1, Vörubifreið N2/N3, Hópbifreið M2/M3, bifhjól, dráttarvél, eftirvagn, torfæruhjól, … |
+| `model` | `Undirtegund` | MODEL Y, DUSTER, ID.4, RAV4, YARIS, … (top ~1000) |
+
+`fuel` is the cleanest read on Iceland's EV transition: e.g. the current fleet
+snapshot is ~171k Bensín, ~151k Dísel, ~44k Rafmagn, ~30k Tengiltvinn.
+
+## Slicers (nyskraningar only)
+
+- `--years 2020-2026` or `--years 2025,2026` — the `Ár - ísl.` slicer (values like `2023L`).
+- `--monthly` — break each year into months (`Mánuður - ísl.`, text labels `01-janúar` … `12-desember`); `--through N` stops at month N.
+- `--import-state new|used|all` — the `Innflutningsástand` slicer (`'Nýtt'`/`'Notað'`). Default `all` = both.
+
+Note the current calendar month is **partial** — the newest month reflects
+registrations to date, not a full month.
+
+## How extraction works (and why the naive way fails)
+
+Each visual POSTs a `SemanticQueryDataShapeCommand` to
+
+```
+https://wabi-europe-north-b-api.analysis.windows.net/public/reports/querydata?synchronous=true
 ```
 
-## Sample Output
+with header `x-powerbi-resourcekey: <key>` and **no bearer token**. It is a
+public report, but the anonymous grant is **session-, origin- and rate-bound**:
 
-```
-TOYOTA               |       52,065 |      8,947
-VOLKSWAGEN, VW       |       19,683 |      4,302
-KIA                  |       21,390 |      1,434
-TESLA                |        9,241 |         62
-BYD                  |          853 |          3
-XPENG                |          352 |          2
-```
+- a cold `httpx` client works for a few requests, then returns
+  `401 PowerBINotAuthorizedException` (rate limit — the API even exposes
+  `retry-after`);
+- a POST from any origin other than the `app.powerbi.com` iframe is rejected
+  outright with 401 (`access-control-allow-origin: *` on responses is a red
+  herring — the *grant* is origin-bound).
 
-## Known Chinese Brands in Iceland
+**The reliable method** (what the script does): drive the SPA with Playwright,
+then replay each query with `fetch()` executed **inside the app.powerbi.com
+iframe** via `frame.evaluate` — reusing the report's own live session, origin
+and pacing. Every year/month/state variant then returns 200.
 
-| Brand | Owner | Status |
-|-------|-------|--------|
-| MG | SAIC (China) | Largest Chinese brand |
-| Polestar | Geely (China) | Swedish-Chinese |
-| BYD | BYD | Growing |
-| XPENG | XPENG | New 2024 |
-| Maxus | SAIC (China) | Commercial vehicles |
-| Aiways | Aiways | Small presence |
+Three more gotchas:
 
-## Data Caveats
+1. The POST body must keep its top-level `modelId` / `version` /
+   `cancelQueries`, or the API answers `400 "ModelId must be between 1 and
+   9.2e18"`.
+2. **Resource keys and the model id rotate** — never hardcode them. The script
+   decodes the key from the active iframe's embed token (`?r=<base64>` →
+   `{"k": …}`) and reads templates off the section's own live requests.
+3. Response rows come in two shapes: `nyskraningar` uses `C: [dimension, count]`;
+   `onroad` uses `G0` + `X[0].M0` (in-traffic count) + `X[1].M0` (new-this-period).
+   The parser handles both.
 
-0. **Geo-fenced to Icelandic IPs (observed 2026-08-06).** `bifreidatolur.samgongustofa.is`
-   answers in ~50 ms from an Icelandic connection and times out
-   (`httpx.ConnectTimeout`) from every GitHub Actions runner — 22 CI runs, 22
-   timeouts, never once reachable. The host is not down; datacenter address
-   space is blocked. Practical consequences:
-   - Scrape from an Icelandic IP (or a VPN exit in Iceland). CI, cloud VMs and
-     most hosted notebooks cannot reach this source at all.
-   - The health probe (`tests/health/test_samgongustofa.py`) is therefore marked
-     `browser`, i.e. manual-dispatch only, and is **not** in the daily required
-     lane — a timeout there would measure GitHub's network position, not
-     Samgöngustofa's health. Run it by hand from Iceland:
-     `uv run pytest -m "health and browser" -k samgongustofa`.
+## GEO-FENCE — must run from Iceland
 
-1. **Real-time data:** Dashboard shows current state, no historical snapshots
-2. **Rate limiting:** Don't scrape too frequently
-3. **Structure changes:** Power BI report structure may change
-4. **Navigation required:** Different tabs may require clicks to load additional data
+`bifreidatolur.samgongustofa.is` answers Icelandic IPs in ~50 ms and
+`ConnectTimeout`s from datacenter address space (GitHub runners, cloud VMs,
+most hosted notebooks cannot reach it). Run the scraper and the health probe
+from an Icelandic connection. The daily health probe therefore runs on the
+self-hosted mac-mini in Iceland (see `AGENTS.md`).
 
-## Alternative Sources
+## Caveats
 
-- **Hagstofan:** Has vehicle counts by fuel type but NOT by make
-  - Path: `Umhverfi/5_samgongur/3_okutaekiogvegir/1_okutaeki/SAM30120.px`
-- **Creditinfo API:** Commercial access to vehicle registry
-- **Bílgreinasambandið:** Industry association statistics
+1. **Real-time only.** The reports show current state; there are no historical
+   snapshots beyond what the year/month slicers expose. Persist CSVs if you need
+   a time series of the *stock*.
+2. **`make` and `model` visuals are top-N** (200 makes / ~1000 models), so their
+   column totals fall slightly below the all-inclusive `class`/`fuel` totals.
+3. **Structure can drift.** Keys/model id rotate (handled). If a section is
+   renamed or a slicer column changes, `list` will show what actually exists —
+   start there.
+4. **Pacing.** The script sleeps ~2.5 s between queries; don't hammer it.
 
-## Evidence Integration
+## Example: Chinese-brand car imports (2026)
 
-Save extracted data to `/data/processed/samgongustofa/`:
+Filtering `make` to Chinese-owned brands (BYD, MG, XPENG, Polestar, Leapmotor,
+Maxus, FAW, …) over `nyskraningar_make_by_year.csv` shows imports rising from
+<1 % of new registrations (2020) to **11 %+ in 2026 YTD**, with Jan–Jul 2026
+Chinese registrations up **~108 %** YoY — while they are still only ~1.6 % of
+the *on-road* fleet (`onroad_make.csv`). The stock lags the flow.
 
-```sql
--- sources/samgongustofa/vehicles_by_make.sql
-SELECT * FROM read_csv('/Users/jokull/Code/hagstofan/data/processed/samgongustofa/vehicles_by_make.csv')
-```
+## Alternative sources
+
+- **Hagstofan** `Umhverfi/5_samgongur/…/SAM30120.px` — fleet by fuel type, **not** by make.
+- **Bílgreinasambandið** — industry-association registration statistics.

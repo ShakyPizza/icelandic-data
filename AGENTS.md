@@ -238,6 +238,13 @@ uv run python scripts/landeignaskra.py lookup 0174540
 # Seðlabanki interest rates — Power BI scrape via gagnabanki.is
 uv run python scripts/sedlabanki_rates.py
 
+# Samgöngustofa bifreiðatölur — vehicle registrations via reverse-engineered Power BI API
+# (geo-fenced: run from an Icelandic IP). list shows both reports + all dimensions.
+uv run python scripts/samgongustofa.py list
+uv run python scripts/samgongustofa.py fetch --report onroad --dimension fuel        # current fleet EV split
+uv run python scripts/samgongustofa.py fetch --dimension make --years 2020-2026      # imports by brand/year
+uv run python scripts/samgongustofa.py fetch --dimension fuel --years 2025,2026 --monthly
+
 # Traffic counters (Vegagerðin) — list, snapshot, accumulate, render
 uv run python scripts/umferd.py stations
 uv run python scripts/umferd.py snapshot
