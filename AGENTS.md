@@ -84,6 +84,10 @@ Python (managed by `uv`):
 # Process raw data into tidy CSVs
 uv run python scripts/sedlabanki.py
 
+# Fetch CBI FX intervention (net purchases/sales, turnover, reserves, ISK/EUR) -> monthly CSV
+uv run python scripts/sedlabanki_fx.py fetch
+uv run python scripts/sedlabanki_fx.py list
+
 # Query processed data
 duckdb -c "SELECT * FROM 'data/processed/*.csv' LIMIT 10"
 
@@ -218,6 +222,10 @@ uv run python scripts/heimsmarkmid.py get 1-1-1
 uv run python scripts/rikisreikningur.py summary
 uv run python scripts/rikisreikningur.py malefni
 uv run python scripts/rikisreikningur.py files
+
+# Ríkissjóður balance 1980-2025 — Hagstofan THJ05211 (pre-2015; the Fjársýsla API only goes back to 2015)
+uv run python scripts/hagstofan_rikissjod.py list     # sibling tables + coverage
+uv run python scripts/hagstofan_rikissjod.py fetch    # → data/processed/rikissjod_balance.csv
 
 # Fjárlög — state budget APPROPRIATIONS + 5-yr plan (málaflokkur level)
 uv run python scripts/fjarlog.py fetch                 # → data/processed/fjarlog.parquet
