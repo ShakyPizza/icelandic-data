@@ -703,13 +703,14 @@ async def map_ownership_chain(
     # Recurse into company owners
     for owner in company.beneficial_owners:
         owner_data = {
-            "kennitala": owner.kennitala,
             "name": owner.name,
             "birth_year_month": owner.birth_year_month,
             "ownership_pct": owner.ownership_pct,
             "ownership_types": owner.ownership_types,
             "type": "company" if owner.is_company else "person",
         }
+        if owner.kennitala:
+            owner_data["kennitala"] = owner.kennitala
 
         if owner.is_company and owner.kennitala:
             # Recurse

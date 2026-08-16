@@ -209,7 +209,6 @@ async def map_ownership_chain(
                 "owners": [...]  # Recursive
             },
             {
-                "kennitala": None,
                 "name": "Jón Jónsson",
                 "birth_year_month": "1980-JANÚAR",
                 "ownership_pct": 50.0,
@@ -248,13 +247,14 @@ async def map_ownership_chain(
         is_company = bool(owner_kt and owner_kt[0] in "4567")
 
         owner_data = {
-            "kennitala": owner_kt,
             "name": owner["name"],
             "birth_year_month": owner["birth_year_month"],
             "ownership_pct": owner["ownership_pct"],
             "ownership_types": owner["ownership_types"],
             "type": "company" if is_company else "person"
         }
+        if owner_kt:
+            owner_data["kennitala"] = owner_kt
 
         if is_company:
             # Recurse into parent company
