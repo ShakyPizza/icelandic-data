@@ -103,6 +103,15 @@ uv run python scripts/financials.py company <kennitala> --year 2024
 # Extract from local PDF
 uv run python scripts/financials.py extract /path/to/report.pdf
 
+# Eurostat — euro-area / EU statistics (wages, HICP, GDP, unemployment)
+uv run python scripts/eurostat.py list
+uv run python scripts/eurostat.py fetch prc_hicp_midx --filter geo=EA20 --filter coicop=CP00 --filter unit=I15
+uv run python scripts/eurostat.py fetch namq_10_a10 --filter geo=EA20 --filter na_item=D1 --filter s_adj=SCA --filter unit=CP_MEUR --filter nace_r2=TOTAL
+uv run python scripts/eurostat.py fetch namq_10_pe --filter geo=EA20 --filter na_item=EMP_DC --filter s_adj=SCA --filter unit=THS_PER
+
+# Real wage comparison Iceland vs euro area (Chart.js HTML report)
+uv run python reports/real_wages_is_vs_euro.py
+
 # Property price analysis
 duckdb -c "SELECT YEAR(kaupsamningur_dags), median(kaupverd*1000/einflm_m2) FROM 'data/processed/kaupskra_geocoded.parquet' WHERE NOT onothaefur AND tegund='Fjölbýli' GROUP BY 1 ORDER BY 1"
 
