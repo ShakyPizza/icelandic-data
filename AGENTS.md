@@ -400,6 +400,21 @@ Pull beats push here: it needs no inbound ingress and no secret, and it catches
 the auto-disable case (where the workflow never runs to push anything) that a
 push-ping structurally cannot.
 
+**Keeping the mini's clone current.** The runner checks out its own workspace
+per run, so `~/Code/icelandic-data` (used by local/agent sessions on the mini)
+has nothing keeping it fresh on its own — it drifted 11 commits behind
+`origin/main` at least once. A periodic ff-only pull fixes that:
+
+| | |
+|---|---|
+| Script | `~/clawd/bin/icelandic-data-pull.sh` |
+| Schedule | `~/Library/LaunchAgents/com.jokull.icelandic-data-pull.plist` (every 6h + at load) |
+| Logs | `~/clawd/logs/icelandic-data-pull.log` |
+| Alert | Telegram via `openclaw message send` — but only on divergence/network failure |
+
+`--ff-only` never clobbers local work; a divergent clone alerts instead of
+force-pulling.
+
 Three properties worth preserving if you touch it:
 
 - **Unreachable ≠ stale.** If the API can't be reached after 3 tries it logs
