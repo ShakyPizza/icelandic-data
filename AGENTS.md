@@ -84,6 +84,10 @@ Python (managed by `uv`):
 # Process raw data into tidy CSVs
 uv run python scripts/sedlabanki.py
 
+# Fetch CBI FX intervention (net purchases/sales, turnover, reserves, ISK/EUR) -> monthly CSV
+uv run python scripts/sedlabanki_fx.py fetch
+uv run python scripts/sedlabanki_fx.py list
+
 # Query processed data
 duckdb -c "SELECT * FROM 'data/processed/*.csv' LIMIT 10"
 
@@ -98,6 +102,15 @@ uv run python scripts/financials.py company <kennitala> --year 2024
 
 # Extract from local PDF
 uv run python scripts/financials.py extract /path/to/report.pdf
+
+# Eurostat — euro-area / EU statistics (wages, HICP, GDP, unemployment)
+uv run python scripts/eurostat.py list
+uv run python scripts/eurostat.py fetch prc_hicp_midx --filter geo=EA20 --filter coicop=CP00 --filter unit=I15
+uv run python scripts/eurostat.py fetch namq_10_a10 --filter geo=EA20 --filter na_item=D1 --filter s_adj=SCA --filter unit=CP_MEUR --filter nace_r2=TOTAL
+uv run python scripts/eurostat.py fetch namq_10_pe --filter geo=EA20 --filter na_item=EMP_DC --filter s_adj=SCA --filter unit=THS_PER
+
+# Real wage comparison Iceland vs euro area (Chart.js HTML report)
+uv run python reports/real_wages_is_vs_euro.py
 
 # Property price analysis
 duckdb -c "SELECT YEAR(kaupsamningur_dags), median(kaupverd*1000/einflm_m2) FROM 'data/processed/kaupskra_geocoded.parquet' WHERE NOT onothaefur AND tegund='Fjölbýli' GROUP BY 1 ORDER BY 1"
@@ -218,6 +231,10 @@ uv run python scripts/heimsmarkmid.py get 1-1-1
 uv run python scripts/rikisreikningur.py summary
 uv run python scripts/rikisreikningur.py malefni
 uv run python scripts/rikisreikningur.py files
+
+# Ríkissjóður balance 1980-2025 — Hagstofan THJ05211 (pre-2015; the Fjársýsla API only goes back to 2015)
+uv run python scripts/hagstofan_rikissjod.py list     # sibling tables + coverage
+uv run python scripts/hagstofan_rikissjod.py fetch    # → data/processed/rikissjod_balance.csv
 
 # Alþingi — parliamentary XML: MPs, per-MP vote records, bills, committees, speeches
 # --thing defaults to the sitting parliament (resolved at runtime, never hardcoded)
@@ -390,6 +407,21 @@ a switch that also opines on source health is a switch that can cry wolf.
 Pull beats push here: it needs no inbound ingress and no secret, and it catches
 the auto-disable case (where the workflow never runs to push anything) that a
 push-ping structurally cannot.
+
+**Keeping the mini's clone current.** The runner checks out its own workspace
+per run, so `~/Code/icelandic-data` (used by local/agent sessions on the mini)
+has nothing keeping it fresh on its own — it drifted 11 commits behind
+`origin/main` at least once. A periodic ff-only pull fixes that:
+
+| | |
+|---|---|
+| Script | `~/clawd/bin/icelandic-data-pull.sh` |
+| Schedule | `~/Library/LaunchAgents/com.jokull.icelandic-data-pull.plist` (every 6h + at load) |
+| Logs | `~/clawd/logs/icelandic-data-pull.log` |
+| Alert | Telegram via `openclaw message send` — but only on divergence/network failure |
+
+`--ff-only` never clobbers local work; a divergent clone alerts instead of
+force-pulling.
 
 Three properties worth preserving if you touch it:
 

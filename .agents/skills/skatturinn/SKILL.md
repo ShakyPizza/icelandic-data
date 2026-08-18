@@ -43,6 +43,11 @@ Each company page at `/fyrirtaekjaskra/leit/kennitala/{kt}` shows:
 
 - **Basic info:** Name, kennitala, address, registration date, legal form
 - **Management:** Directors, beneficial owners with ownership percentages
+- **Beneficial owners (Raunverulegir eigendur):** Name, birth year/month, %
+  and holding type (Beint/Óbeint). Beneficial owners are by definition natural
+  persons — the page shows **no kennitala** for them, only birth year/month.
+  Listed companies (kauphallarfélög) render no owner block at all.
+- **Shareholders (Hluthafar):** Section on some pages; may carry kennitalas
 - **Activity:** ÍSAT codes (business classification)
 - **Annual reports table:** List of submitted reports with:
   - Operating year (Rek. ár)
@@ -272,11 +277,22 @@ The first 6 digits encode the registration date. Century determined by 9th digit
 
 1. **PDF variability:** Report formats vary by year and preparer (accountant). Some are structured, some are scanned images.
 
-2. **Ownership on page vs PDF:** The company lookup page shows current beneficial owners. The annual report PDF shows ownership as of fiscal year end - these may differ.
+2. **Ownership on page vs PDF:** The company lookup page shows current
+   beneficial owners — always natural persons, with birth year/month but **no
+   kennitala** (`Owner.kennitala` is `None`; the chain cannot recurse through
+   them from the page alone). The annual report PDF shows ownership as of
+   fiscal year end with full kennitalas — run `chain` with `--download` to
+   get kennitalas and follow corporate structures. Page and PDF may differ.
 
-3. **Holding structures:** Beneficial owners may be foreign entities without Icelandic kennitala, making chain tracing incomplete.
+3. **Holding structures:** Beneficial owners may be foreign entities without
+   Icelandic kennitala, making chain tracing incomplete.
 
-4. **Rate limits:** Unknown but assume conservative limits. Add 2-5 second delays between requests.
+4. **Rate limits:** Unknown but assume conservative limits. Add 2-5 second
+   delays between requests. Rapid consecutive requests bounce to a terms page
+   (`Notkunarskilmálar`); `get_company_info()` detects that and returns
+   `None` instead of misreporting it as a company — wait and retry. The
+   name-search endpoint (`?nafn=`) can be flaky under load; the kennitala
+   lookup page is the stable entry point.
 
 5. **Terms of service:** No explicit prohibition on automated access, but bulk scraping may trigger blocks. Consider contacting fyrirtaekjaskra@skatturinn.is for data access agreements.
 
@@ -311,14 +327,17 @@ FROM read_csv('../data/processed/skatturinn/ownership.csv')
 ## Quick Commands
 
 ```bash
-# Download single report
-uv run python scripts/skatturinn.py download --kennitala 5012043070 --year 2023
+# Download single report (kennitala is positional, not a --flag)
+uv run python scripts/skatturinn.py download 5012043070 --year 2023
 
 # Map ownership chain
-uv run python scripts/skatturinn.py chain --kennitala 5012043070 --depth 3
+uv run python scripts/skatturinn.py chain 5012043070 --depth 3
 
-# Bulk download for list of companies
-uv run python scripts/skatturinn.py bulk --input companies.txt --year 2023
+# Company info incl. beneficial owners (ownership check)
+uv run python scripts/skatturinn.py info 5012043070
+
+# Bulk download for list of companies (no bulk subcommand — loop instead)
+while read kt; do uv run python scripts/skatturinn.py download "$kt" --year 2023; done < companies.txt
 ```
 
 ## Related Skills
